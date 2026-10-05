@@ -1,0 +1,39 @@
+[project]
+name = "hachiyang"
+version = "0.1.0"
+description = "HachiYang 陪伴型 Agent —— 秧秧·玄翎（飞书渠道 + 角色化对话 + RAG + 三层记忆 + 关怀调度）"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = [
+    # ---- Phase 0：基础设施 ----
+    "openai",                # 火山方舟 LLM/Embedding（OpenAI 兼容端点）
+    "pydantic>=2",           # 核心数据结构（core/models.py）
+    "pydantic-settings",     # 配置加载与校验（config.py）
+    "python-dotenv",         # .env 加载（pydantic-settings env_file 依赖）
+    "chromadb",              # 向量库（rag_knowledge / episodic_memory）
+    # ---- Phase 1：飞书渠道 + Web 服务 ----
+    "fastapi",               # 飞书 webhook 回调 + 本地调试台
+    "uvicorn[standard]",     # ASGI 服务器
+    "lark-oapi",             # 飞书官方 SDK
+    # ---- Phase 3：RAG 文档解析 ----
+    "EbookLib",              # EPUB 解析
+    "beautifulsoup4",        # EPUB HTML 解析
+    "PyMuPDF",               # PDF 解析（Outline + 页文本 + 术语索引页）
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",                # 单元测试 + 集成测试
+]
+# 可选：jieba  # FTS5 中文分词增强（非强制，需要时启用）
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
