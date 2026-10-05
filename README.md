@@ -141,8 +141,8 @@ flowchart TD
 | 语言 | Python ≥ 3.11 |
 | Web 框架 | FastAPI + Uvicorn |
 | 飞书接入 | lark-oapi（事件订阅 / WebSocket 长连接 / 消息 API） |
-| LLM | 火山方舟 OpenAI 兼容接口 · `deepseek-v4-pro` |
-| Embedding | 火山方舟 OpenAI 兼容接口 · `doubao-embedding-vision` |
+| LLM | OpenAI 兼容接口 · `deepseek-v4-pro` |
+| Embedding | OpenAI 兼容接口 · `doubao-embedding-vision` |
 | 向量库 | ChromaDB（持久化） |
 | 结构化存储 | SQLite（会话/画像/提醒 + FTS5 全文检索） |
 | 文档解析 | EbookLib + BeautifulSoup4（EPUB）、PyMuPDF（PDF） |
@@ -188,13 +188,13 @@ cp .env.example .env
 Windows（PowerShell，执行一次后重开终端生效）：
 
 ```powershell
-[Environment]::SetEnvironmentVariable('ARK_KEY','你的火山方舟APIKey','User')
+[Environment]::SetEnvironmentVariable('ARK_KEY','你的 OpenAI 兼容协议APIKey','User')
 ```
 
 macOS / Linux（写入 `~/.bashrc` 或 `~/.zshrc`）：
 
 ```bash
-export ARK_KEY="你的火山方舟APIKey"
+export ARK_KEY="你的 OpenAI 兼容协议APIKey"
 ```
 
 `.env` 中至少需要配置：
@@ -212,7 +212,7 @@ FEISHU_MODE=websocket
 
 配置缺失时服务**不会崩溃**，而是在启动日志中输出明确告警，不依赖密钥的调试台与存储功能仍可使用。
 
-> 💡 **关于模型名**：标准 OpenAI 兼容端点（`/api/v3`）下，`LLM_MODEL` / `EMBEDDING_MODEL` 需填写方舟控制台中实际开通的**模型 ID**（如 `doubao-...`）或**推理接入点 ID**（`ep-...`）。上文为默认示例值，请按你的账号实际可用模型替换。
+> 💡 **关于模型名**：标准 OpenAI 兼容端点（`/api/v3`）下，`LLM_MODEL` / `EMBEDDING_MODEL` 需填写使用的**模型 ID**（如 `doubao-...`）或**推理接入点 ID**（`ep-...`）。上文为默认示例值，请按你的账号实际可用模型替换。
 
 ### 4. 准备知识库
 
@@ -368,8 +368,8 @@ HachiYang/
 
 | 环境变量 | 默认值 | 说明 |
 |----------|--------|------|
-| `ARK_KEY` | — | **必填**。火山方舟 API Key，仅从系统环境变量读取 |
-| `ARK_BASE_URL` | — | **必填**。火山方舟 API 地址（LLM/Embedding 共用） |
+| `ARK_KEY` | — | **必填**。OpenAI 兼容协议 API Key，仅从系统环境变量读取 |
+| `ARK_BASE_URL` | — | **必填**。OpenAI 兼容协议 API 地址（LLM/Embedding 共用） |
 | `LLM_MODEL` | `deepseek-v4-pro` | 语言模型名 |
 | `EMBEDDING_MODEL` | `doubao-embedding-vision` | Embedding 模型名 |
 | `FEISHU_APP_ID` | — | 飞书机器人 App ID |
