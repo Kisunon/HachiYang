@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HachiYang 本地调试台</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      overflow: hidden;
+    }
+    .header {
+      background: #1d1d1f;
+      color: #fff;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header h1 { margin: 0; font-size: 16px; font-weight: 500; }
+    .header .badge {
+      font-size: 11px;
+      background: #4caf50;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-left: 8px;
+    }
+    .header .badge.offline { background: #f44336; }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: minmax(0, 1fr);
+      gap: 12px;
+      padding: 12px;
+      height: calc(100vh - 48px);
+    }
+    .panel {
+      background: #fff;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .panel h2 {
+      margin: 0;
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #6e6e73;
+      border-bottom: 1px solid #f0f0f2;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .side { display: flex; flex-direction: column; gap: 12px; }
+    .side .panel { flex: 1; min-height: 0; }
+
+    /* 聊天面板 */
+    #messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg { max-width: 80%; padding: 10px 14px; border-radius: 14px; line-height: 1.5; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { align-self: flex-end; background: #007aff; color: #fff; border-bottom-right-radius: 4px; }
+    .msg.bot { align-self: flex-start; background: #e9e9eb; color: #1d1d1f; border-bottom-left-radius: 4px; }
+    .msg.error { align-self: center; background: #ffeaea; color: #c62828; font-size: 12px; max-width: 100%; }
+    .msg .meta { font-size: 10px; color: #8e8e93; margin-top: 4px; }
+    .msg.user .meta { color: rgba(255,255,255,0.7); }
+
+    /* 链路追踪折叠面板（仅 bot 消息） */
+    .trace-wrap { margin-top: 8px; }
+    .trace-details { background: #fff; border: 1px solid #e2e2e7; border-radius: 8px; overflow: hidden; }
+    .trace-summary {
+      padding: 6px 10px; font-size: 12px; color: #6e6e73; cursor: pointer;
+      user-select: none; list-style: none; display: block;
+      background: #f7f7f9;
+    }
+    .trace-summary::-webkit-details-marker { display: none; }
+    /* flex 布局下沉到内部子元素，避免 summary 的 display:flex 破坏原生展开/收起 */
+    .trace-summary-inner { display: flex; align-items: center; gap: 6px; }
+    .trace-summary-inner::before { content: "▸"; font-size: 10px; transition: transform 0.15s; }
+    .trace-details[open] .trace-summary-inner::before { transform: rotate(90deg); }
+    .trace-summary .trace-count { color: #007aff; font-weight: 600; }
+    .trace-body { padding: 8px 10px; max-height: 360px; overflow-y: auto; }
+    .trace-stage {
+      border: 1px solid #eee; border-radius: 6px; margin-bottom: 8px;
+      background: #fafafa; overflow: hidden;
+    }
+    .trace-stage:last-child { margin-bottom: 0; }
+    .trace-stage-head {
+      padding: 5px 10px; font-size: 12px; font-weight: 600; color: #1d1d1f;
+      background: #eef3fb; border-bottom: 1px solid #e2e2e7;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .trace-stage-head .idx { color: #007aff; font-family: ui-monospace, monospace; }
+    .trace-stage-body { padding: 8px 10px; font-size: 11px; line-height: 1.6; }
+    .trace-field { margin-bottom: 6px; }
+    .trace-field:last-child { margin-bottom: 0; }
+    .trace-field-label {
+      display: inline-block; min-width: 46px; font-weight: 600; color: #6e6e73;
+      vertical-align: top;
+    }
+    .trace-field pre {
+      margin: 2px 0 0; padding: 6px 8px; background: #fff; border: 1px solid #eee;
+      border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+      max-height: 180px; overflow-y: auto; color: #1d1d1f;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid #f0f0f2;
+      align-items: center;
+    }
+    #text-input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #d2d2d7;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+    }
+    #text-input:focus { border-color: #007aff; }
+    #send-btn {
+      padding: 10px 18px;
+      background: #007aff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    #send-btn:disabled { background: #b0b0b5; cursor: not-allowed; }
+    .uid-row { padding: 8px 12px 0; }
+    #user-id {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid #e2e2e7;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: ui-monospace, monospace;
+      color: #6e6e73;
+      outline: none;
+    }
+
+    /* 日志面板 */
+    #logs {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      background: #fafafa;
+    }
+    .log-line { padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
+    .log-line .lvl { display: inline-block; min-width: 44px; font-weight: 600; }
+    .log-line .t { color: #8e8e93; margin-right: 6px; }
+    .log-line .lg { color: #6e6e73; margin-right: 6px; }
+    .lvl-INFO { color: #1976d2; }
+    .lvl-WARNING { color: #f57c00; }
+    .lvl-ERROR, .lvl-CRITICAL { color: #c62828; }
+    .lvl-DEBUG { color: #6e6e73; }
+
+    /* 状态面板 */
+    #status {
+      padding: 12px 16px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      overflow-y: auto;
+      flex: 1;
+      color: #1d1d1f;
+      white-space: pre-wrap;
+    }
+
+    .empty-hint { color: #8e8e93; text-align: center; padding: 24px 12px; font-size: 13px; }
+    .toolbar-btn { font-size: 11px; background: #f0f0f2; border: none; border-radius: 6px; padding: 4px 10px; cursor: pointer; color: #1d1d1f; }
+    .toolbar-btn:hover { background: #e2e2e7; }
+
+    /* ===== Phase 3.5：知识库检查视图 ===== */
+    .tab-bar { display: flex; align-items: center; gap: 4px; background: #fff; border-bottom: 1px solid #e2e2e7; padding: 0 16px; height: 36px; }
+    .tab { border: none; background: none; padding: 8px 16px; font-size: 13px; cursor: pointer; color: #6e6e73; border-bottom: 2px solid transparent; font-family: inherit; }
+    .tab.active { color: #007aff; border-bottom-color: #007aff; font-weight: 600; }
+    .layout#view-chat { height: calc(100vh - 84px); }
+    .kb-layout { display: grid; grid-template-columns: 290px 1fr 400px; gap: 12px; padding: 12px; height: calc(100vh - 84px); }
+    .kb-col { background: #fff; border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); min-height: 0; }
+    .kb-col h2 { margin: 0; padding: 10px 14px; font-size: 13px; font-weight: 600; color: #6e6e73; border-bottom: 1px solid #f0f0f2; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+    .kb-col-body { flex: 1; overflow-y: auto; padding: 10px 12px; min-height: 0; }
+    .doc-card { border: 1px solid #e8e8ed; border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; cursor: pointer; }
+    .doc-card:hover { background: #f5f7fa; }
+    .doc-card.active { border-color: #007aff; background: #f0f6ff; }
+    .doc-name { font-size: 12px; font-weight: 600; word-break: break-all; line-height: 1.4; }
+    .doc-meta { font-size: 11px; color: #6e6e73; margin-top: 5px; line-height: 1.7; }
+    .st-badge { font-size: 10px; padding: 1px 7px; border-radius: 8px; color: #fff; white-space: nowrap; }
+    .st-done { background: #34c759; } .st-indexing { background: #007aff; } .st-failed { background: #ff3b30; } .st-not_indexed { background: #8e8e93; }
+    .st-indexed_but_summary_pending, .st-summary_partial { background: #ff9500; }
+    .coverage-warn { color: #ff9500; font-weight: 600; }
+    .coverage-ok { color: #34c759; }
+    .subtabs { display: flex; gap: 4px; padding: 8px 12px 0; }
+    .subtab { border: 1px solid #d2d2d7; background: #fff; border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer; color: #1d1d1f; font-family: inherit; }
+    .subtab.active { background: #007aff; border-color: #007aff; color: #fff; }
+    .kb-toolbar { display: flex; gap: 6px; padding: 8px 12px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid #f5f5f7; }
+    .kb-toolbar input, .kb-toolbar select { padding: 5px 8px; border: 1px solid #d2d2d7; border-radius: 6px; font-size: 12px; font-family: inherit; outline: none; }
+    .kb-toolbar input[type=text] { flex: 1; min-width: 120px; }
+    .kb-toolbar input:focus, .kb-toolbar select:focus { border-color: #007aff; }
+    .crumb { font-size: 12px; color: #6e6e73; padding: 8px 12px 0; }
+    .crumb .jump-link { margin-right: 8px; }
+    .chapter-card, .block-card, .term-card { border: 1px solid #e8e8ed; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+    .chapter-card:hover, .block-card:hover, .term-card:hover { background: #f5f7fa; }
+    .block-card.summary { border-left: 3px solid #ffb400; background: #fffdf2; }
+    .block-card.chapter-summary { border-left: 3px solid #af52de; background: #fcf8ff; }
+    .volume-label { font-size: 10px; color: #7b1fa2; background: #f1e0ff; padding: 0 6px; border-radius: 6px; }
+    .anchor-tag { font-size: 10px; color: #8e8e93; font-family: ui-monospace, monospace; }
+    .block-head { font-size: 11px; color: #6e6e73; display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; align-items: center; }
+    .type-tag { font-size: 10px; padding: 0 6px; border-radius: 6px; background: #e9e9eb; color: #6e6e73; }
+    .type-tag.summary { background: #fff3d0; color: #9a6700; }
+    .type-tag.chapter { background: #f1e0ff; color: #7b1fa2; }
+    .block-snippet, .term-line { font-size: 12px; line-height: 1.6; color: #1d1d1f; white-space: pre-wrap; word-break: break-word; }
+    .pager { display: flex; gap: 8px; align-items: center; padding: 8px 2px; font-size: 12px; color: #6e6e73; }
+    .pager button { font-size: 12px; padding: 3px 10px; }
+    .score-badge { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: #e3f0ff; color: #007aff; font-family: ui-monospace, monospace; }
+    .detail-body { font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+    .detail-meta { font-size: 11px; color: #6e6e73; font-family: ui-monospace, monospace; margin-bottom: 8px; line-height: 1.8; }
+    .jump-link { color: #007aff; cursor: pointer; text-decoration: underline; font-size: 12px; }
+    .child-item { border-left: 2px solid #e8e8ed; padding: 4px 8px; margin: 6px 0; font-size: 12px; cursor: pointer; }
+    .child-item:hover { background: #f5f7fa; }
+    .quota-warn { font-size: 11px; color: #ff9500; }
+    .guide { border-top: 2px solid #f0f0f2; }
+    .guide h3 { margin: 0; padding: 8px 14px; font-size: 12px; cursor: pointer; color: #6e6e73; user-select: none; }
+    .guide-body { padding: 0 12px 12px; font-size: 11px; }
+    .guide-table { width: 100%; border-collapse: collapse; }
+    .guide-table td { border: 1px solid #eee; padding: 5px 7px; vertical-align: top; line-height: 1.6; }
+    .guide-table code { background: #f5f5f7; padding: 0 4px; border-radius: 3px; font-size: 10px; word-break: break-all; }
+    .err-box { background: #ffeaea; color: #c62828; border-radius: 8px; padding: 8px 10px; font-size: 12px; margin: 8px 0; white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>HachiYang 调试台 <span id="sse-badge" class="badge">SSE 未连接</span></h1>
+    </div>
+    <div>
+      <button class="toolbar-btn" id="refresh-status">刷新状态</button>
+      <button class="toolbar-btn" id="clear-logs">清空日志</button>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab active" id="tab-chat" data-view="chat">对话调试</button>
+    <button class="tab" id="tab-kb" data-view="kb">知识库检查</button>
+  </div>
+
+  <div class="layout" id="view-chat">
+    <!-- 左侧：聊天面板 -->
+    <section class="panel">
+      <h2>对话面板</h2>
+      <div class="uid-row">
+        <input id="user-id" placeholder="user_id（默认 local:debug，留空使用默认）">
+      </div>
+      <div id="messages">
+        <div class="empty-hint">输入消息，按 Enter 或点击「发送」与秧秧对话<br>（走 Orchestrator 完整链路：意图→人格→LLM→风格改写）</div>
+      </div>
+      <div class="input-row">
+        <input id="text-input" placeholder="输入消息..." autocomplete="off">
+        <button id="send-btn">发送</button>
+      </div>
+    </section>
+
+    <!-- 右侧：状态 + 日志 -->
+    <section class="side">
+      <div class="panel" style="flex: 0 0 auto; max-height: 35%;">
+        <h2>运行状态</h2>
+        <pre id="status">点击右上角「刷新状态」加载...</pre>
+      </div>
+      <div class="panel">
+        <h2>实时日志 <span style="font-weight:400; color:#8e8e93;">SSE /debug/events</span></h2>
+        <div id="logs"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Phase 3.5：知识库索引人工检查（只读） -->
+  <div class="kb-layout" id="view-kb" style="display:none;">
+    <!-- 左栏：文档列表 -->
+    <section class="kb-col">
+      <h2>文档列表 <button class="toolbar-btn" id="kb-reload-docs">刷新</button></h2>
+      <div class="kb-col-body" id="kb-docs">
+        <div class="empty-hint">加载中...</div>
+      </div>
+    </section>
+
+    <!-- 中栏：章节/切片/术语/检索 -->
+    <section class="kb-col">
+      <h2 id="kb-mid-title">切片浏览</h2>
+      <div class="subtabs">
+        <button class="subtab active" data-sub="browse">章节/切片</button>
+        <button class="subtab" data-sub="terms">术语表</button>
+        <button class="subtab" data-sub="retrieve">检索试跑</button>
+      </div>
+      <div class="crumb" id="kb-crumb"></div>
+      <div class="kb-toolbar" id="kb-toolbar"></div>
+      <div class="kb-col-body" id="kb-mid-body">
+        <div class="empty-hint">请先在左侧选择一个文档</div>
+      </div>
+    </section>
+
+    <!-- 右栏：详情 + 问题处理指引 -->
+    <section class="kb-col">
+      <h2>详情</h2>
+      <div class="kb-col-body" id="kb-detail">
+        <div class="empty-hint">点击中间栏的切片 / 术语查看详情</div>
+      </div>
+      <div class="guide">
+        <h3 id="kb-guide-toggle">▸ 发现索引问题时的处理方式</h3>
+        <div class="guide-body" id="kb-guide-body" style="display:none;">
+          <table class="guide-table">
+            <tr><td>切片切分错误 / 乱码 / 截断异常</td><td>修复 <code>app/rag/parsers/</code> 或 <code>chunker.py</code> 后执行 <code>python scripts/reindex_all.py --resume</code>（failed/indexing 文档自动重建，done 且未变文档跳过）</td></tr>
+            <tr><td>章节摘要缺失 / 质量差</td><td>摘要为索引时 LLM 生成，限流 429 时降级跳过；配额恢复后对该文档 <code>--resume</code> 重建补全</td></tr>
+            <tr><td>向量覆盖率不足（SQLite 有块、向量缺失）</td><td>Embedding 批次失败所致，文档已标记 failed；<code>--resume</code> 自动重建，<b>勿手工改 SQLite/ChromaDB</b></td></tr>
+            <tr><td>术语缺失 / 错误</td><td>检查 <code>term_builder.py</code> 索引页解析（PDF 正则 / EPUB 结构化条目），修复后 <code>--resume</code></td></tr>
+            <tr><td>done 文档需强制重建</td><td>将该文档 <code>rag_documents.status</code> 置为 <code>failed</code>（或改动源文件使 hash 变化）后执行 <code>--resume</code></td></tr>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const messagesEl = $('messages');
+    const textInput = $('text-input');
+    const sendBtn = $('send-btn');
+    const logsEl = $('logs');
+    const statusEl = $('status');
+    const userIdEl = $('user-id');
+    const sseBadge = $('sse-badge');
+
+    // ---- 聊天 ----
+    function appendMessage(role, text, meta, trace) {
+      // 移除占位提示
+      const hint = messagesEl.querySelector('.empty-hint');
+      if (hint) hint.remove();
+
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      const t = document.createElement('div');
+      t.textContent = text;
+      div.appendChild(t);
+      if (meta) {
+        const m = document.createElement('div');
+        m.className = 'meta';
+        m.textContent = meta;
+        div.appendChild(m);
+      }
+      // bot 消息且携带 trace 时，附加可折叠链路追踪面板
+      if (role === 'bot' && Array.isArray(trace) && trace.length > 0) {
+        div.appendChild(renderTrace(trace));
+      }
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    // 渲染链路追踪折叠面板（各环节输入 / 组装提示词 / 输出）
+    function renderTrace(trace) {
+      const wrap = document.createElement('div');
+      wrap.className = 'trace-wrap';
+      const details = document.createElement('details');
+      details.className = 'trace-details';
+      const summary = document.createElement('summary');
+      summary.className = 'trace-summary';
+      summary.innerHTML = '<span class="trace-summary-inner">🔍 链路追踪 <span class="trace-count">' + trace.length + '</span> 个环节（点击展开/收起审核）</span>';
+      details.appendChild(summary);
+
+      const body = document.createElement('div');
+      body.className = 'trace-body';
+      trace.forEach((stage, i) => {
+        const stageEl = document.createElement('div');
+        stageEl.className = 'trace-stage';
+        const head = document.createElement('div');
+        head.className = 'trace-stage-head';
+        head.innerHTML = '<span class="idx">#' + (i + 1) + '</span> ' + esc(stage.name || '');
+        stageEl.appendChild(head);
+
+        const stageBody = document.createElement('div');
+        stageBody.className = 'trace-stage-body';
+        if (stage.input) {
+          stageBody.appendChild(renderTraceField('输入', stage.input));
+        }
+        if (stage.output) {
+          stageBody.appendChild(renderTraceField('输出', stage.output));
+        }
+        if (stage.notes) {
+          // LLM 环节的 notes 是完整提示词；非 LLM 环节是说明文字
+          const isLLMStage = /query_rewrite|rerank|intent_parse|polish|llm_generate/i.test(stage.name || '');
+          stageBody.appendChild(renderTraceField(isLLMStage ? '提示词' : '说明', stage.notes));
+        }
+        stageEl.appendChild(stageBody);
+        body.appendChild(stageEl);
+      });
+      details.appendChild(body);
+      wrap.appendChild(details);
+      return wrap;
+    }
+
+    function renderTraceField(label, value) {
+      const field = document.createElement('div');
+      field.className = 'trace-field';
+      const lab = document.createElement('span');
+      lab.className = 'trace-field-label';
+      lab.textContent = label;
+      field.appendChild(lab);
+      const pre = document.createElement('pre');
+      pre.textContent = value;
+      field.appendChild(pre);
+      return field;
+    }
+
+    async function sendMessage() {
+      const text = textInput.value.trim();
+      if (!text) return;
+      const user_id = userIdEl.value.trim() || null;
+
+      appendMessage('user', text);
+      textInput.value = '';
+      sendBtn.disabled = true;
+      sendBtn.textContent = '生成中...';
+
+      const placeholder = appendMessage('bot', '...（风正在聆听）...');
+
+      try {
+        const resp = await fetch('/debug/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, user_id }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          placeholder.querySelector('div').textContent = '错误：' + (data.detail || resp.statusText);
+          placeholder.className = 'msg error';
+          return;
+        }
+        placeholder.querySelector('div').textContent = data.text;
+        const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        placeholder.querySelector('.meta') || (() => {
+          const m = document.createElement('div');
+          m.className = 'meta';
+          placeholder.appendChild(m);
+          return m;
+        })();
+        placeholder.querySelector('.meta').textContent = time + (data.user_id ? ' · ' + data.user_id : '');
+        // 挂载链路追踪折叠面板（若返回）
+        if (Array.isArray(data.trace) && data.trace.length > 0) {
+          placeholder.appendChild(renderTrace(data.trace));
+        }
+      } catch (e) {
+        placeholder.querySelector('div').textContent = '请求失败：' + e.message;
+        placeholder.className = 'msg error';
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = '发送';
+        textInput.focus();
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // ---- 状态 ----
+    async function refreshStatus() {
+      statusEl.textContent = '加载中...';
+      try {
+        const resp = await fetch('/debug/status');
+        const data = await resp.json();
+        statusEl.textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        statusEl.textContent = '加载失败：' + e.message;
+      }
+    }
+    $('refresh-status').addEventListener('click', refreshStatus);
+
+    // ---- SSE 日志 ----
+    let evtSource = null;
+    let sseRetryTimer = null;
+
+    function connectSSE() {
+      if (evtSource) evtSource.close();
+      evtSource = new EventSource('/debug/events');
+
+      evtSource.onopen = () => {
+        sseBadge.textContent = 'SSE 已连接';
+        sseBadge.className = 'badge';
+      };
+
+      evtSource.onmessage = (e) => {
+        try {
+          const item = JSON.parse(e.data);
+          appendLog(item);
+        } catch {
+          // 非 JSON（如心跳注释），忽略
+        }
+      };
+
+      evtSource.onerror = () => {
+        sseBadge.textContent = 'SSE 断开，重连中';
+        sseBadge.className = 'badge offline';
+        evtSource.close();
+        // 断线重连
+        if (sseRetryTimer) clearTimeout(sseRetryTimer);
+        sseRetryTimer = setTimeout(connectSSE, 3000);
+      };
+    }
+
+    function appendLog(item) {
+      const line = document.createElement('div');
+      line.className = 'log-line';
+
+      const ts = document.createElement('span');
+      ts.className = 't';
+      const d = new Date(item.ts * 1000);
+      ts.textContent = d.toLocaleTimeString('zh-CN', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+
+      const lvl = document.createElement('span');
+      lvl.className = 'lvl lvl-' + item.level;
+      lvl.textContent = item.level;
+
+      const lg = document.createElement('span');
+      lg.className = 'lg';
+      lg.textContent = '[' + (item.logger || '') + ']';
+
+      const msg = document.createElement('span');
+      msg.textContent = ' ' + item.msg;
+
+      line.appendChild(ts);
+      line.appendChild(lvl);
+      line.appendChild(lg);
+      line.appendChild(msg);
+      logsEl.appendChild(line);
+
+      // 限制日志条数，避免内存爆炸
+      while (logsEl.children.length > 500) {
+        logsEl.removeChild(logsEl.firstChild);
+      }
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }
+
+    $('clear-logs').addEventListener('click', () => { logsEl.innerHTML = ''; });
+
+    // ==================== Phase 3.5：知识库检查 ====================
+    const kbDocsEl = $('kb-docs'), kbMidEl = $('kb-mid-body'), kbToolbarEl = $('kb-toolbar');
+    const kbCrumbEl = $('kb-crumb'), kbDetailEl = $('kb-detail'), kbMidTitle = $('kb-mid-title');
+    const KB = '/debug/rag';
+    const kb = {
+      docs: [], doc: null, sub: 'browse',
+      chapters: [], chapter: null, blockType: '',
+      blocksTotal: 0, blocksOffset: 0,
+      termsTotal: 0, termsOffset: 0, termQ: '',
+      detailBlockId: null,
+    };
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function shortId(id) { return id ? String(id).slice(0, 8) : ''; }
+    const statusText = {
+      done: 'done 已完成', indexing: 'indexing 索引中', failed: 'failed 失败', not_indexed: 'not_indexed 未入库',
+      indexed_but_summary_pending: 'pending 正文已入库·摘要待补', summary_partial: 'partial 摘要部分缺失',
+    };
+
+    async function kbFetch(path) {
+      const resp = await fetch(KB + path);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || data.error || ('HTTP ' + resp.status));
+      return data;
+    }
+
+    // ---- 视图切换 ----
+    $('tab-chat').addEventListener('click', () => switchView('chat'));
+    $('tab-kb').addEventListener('click', () => switchView('kb'));
+    function switchView(v) {
+      $('tab-chat').classList.toggle('active', v === 'chat');
+      $('tab-kb').classList.toggle('active', v === 'kb');
+      $('view-chat').style.display = v === 'chat' ? 'grid' : 'none';
+      $('view-kb').style.display = v === 'kb' ? 'grid' : 'none';
+      if (v === 'kb' && kb.docs.length === 0) loadDocs();
+    }
+    $('kb-guide-toggle').addEventListener('click', () => {
+      const body = $('kb-guide-body');
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? 'block' : 'none';
+      $('kb-guide-toggle').textContent = (hidden ? '▾' : '▸') + ' 发现索引问题时的处理方式';
+    });
+
+    // ---- 左栏：文档列表 ----
+    $('kb-reload-docs').addEventListener('click', loadDocs);
+    async function loadDocs() {
+      kbDocsEl.innerHTML = '<div class="empty-hint">加载中...</div>';
+      try {
+        const data = await kbFetch('/docs');
+        kb.docs = data.documents;
+        kb.termEnabled = !!data.term_feature_enabled;
+        // 术语表功能弃置（rag_enable_term=False）时隐藏术语子页签
+        document.querySelector('.subtab[data-sub="terms"]').style.display = kb.termEnabled ? '' : 'none';
+        if (!kb.termEnabled && kb.sub === 'terms') switchSub('browse');
+        renderDocs();
+      } catch (e) {
+        kbDocsEl.innerHTML = '<div class="err-box">文档列表加载失败：' + esc(e.message) + '</div>';
+      }
+    }
+    function coverageCell(d) {
+      const total = d.sqlite_block_count || 0;
+      const vec = d.vector_count;
+      if (d.status === 'not_indexed' || total === 0) return '';
+      if (vec < 0) return '<span class="doc-meta">向量数：查询失败</span>';
+      const pct = Math.round(vec / total * 100);
+      const cls = pct >= 100 ? 'coverage-ok' : 'coverage-warn';
+      return `<span class="${cls}">向量覆盖：${vec}/${total}（${pct}%）</span><br>`;
+    }
+    function renderDocs() {
+      kbDocsEl.innerHTML = '';
+      for (const d of kb.docs) {
+        const card = document.createElement('div');
+        card.className = 'doc-card' + (kb.doc && kb.doc.document_id === d.document_id && d.document_id ? ' active' : '');
+        if (!d.document_id) card.style.opacity = '0.75';
+        card.innerHTML = `
+          <div class="doc-name">${esc(d.file_name)}</div>
+          <div class="doc-meta">
+            <span class="st-badge st-${esc(d.status)}">${statusText[d.status] || d.status}</span>
+            ${d.language ? ' · ' + esc(d.language) : ''} · ${esc(d.domain || '')}<br>
+            ${d.volume_count ? '卷数：' + d.volume_count + '　' : ''}切片：${d.sqlite_block_count || 0}　节摘要：${d.sqlite_section_summary_count || 0}　章摘要：${d.sqlite_chapter_summary_count || 0}${kb.termEnabled ? '　术语：' + (d.term_count || 0) : ''}<br>
+            ${coverageCell(d)}
+            ${d.size_mb ? '文件：' + d.size_mb + ' MB' : ''}
+          </div>`;
+        card.addEventListener('click', () => selectDoc(d));
+        kbDocsEl.appendChild(card);
+      }
+    }
+    function selectDoc(d) {
+      kb.doc = d;
+      kb.chapter = null; kb.blockType = ''; kb.chapters = [];
+      kbDetailEl.innerHTML = '<div class="empty-hint">点击中间栏的切片 / 术语查看详情</div>';
+      renderDocs();
+      switchSub(kb.sub === 'retrieve' || kb.sub === 'terms' ? kb.sub : 'browse');
+    }
+
+    // ---- 中栏子页签 ----
+    document.querySelectorAll('.subtab').forEach((btn) => {
+      btn.addEventListener('click', () => switchSub(btn.dataset.sub));
+    });
+    function switchSub(sub) {
+      kb.sub = sub;
+      document.querySelectorAll('.subtab').forEach((b) => b.classList.toggle('active', b.dataset.sub === sub));
+      kbMidTitle.textContent = { browse: '切片浏览', terms: '术语表', retrieve: '检索试跑' }[sub];
+      if (sub === 'browse') {
+        if (!kb.doc || !kb.doc.document_id) {
+          kbCrumbEl.textContent = ''; kbToolbarEl.innerHTML = '';
+          kbMidEl.innerHTML = '<div class="empty-hint">请先在左侧选择一个已入库的文档</div>';
+        } else {
+          loadChapters();
+        }
+      } else if (sub === 'terms') {
+        kb.termsOffset = 0;
+        renderTermsToolbar(); loadTerms();
+      } else {
+        renderRetrieveToolbar();
+        kbMidEl.innerHTML = '<div class="empty-hint">输入查询词，选择检索模式后点击「试跑」<br>FTS 关键词检索零配额；向量语义检索消耗 Embedding 配额</div>';
+      }
+    }
+
+    // ---- 章节列表 ----
+    async function loadChapters() {
+      kbCrumbEl.textContent = kb.doc ? `文档：${kb.doc.file_name}` : '';
+      kbToolbarEl.innerHTML = '';
+      kbMidEl.innerHTML = '<div class="empty-hint">章节加载中...</div>';
+      try {
+        const data = await kbFetch(`/docs/${kb.doc.document_id}/chapters`);
+        kb.chapters = data.chapters;
+        renderChapters();
+      } catch (e) {
+        kbMidEl.innerHTML = '<div class="err-box">章节加载失败：' + esc(e.message) + '</div>';
+      }
+    }
+    function renderChapters() {
+      let html = `<div class="chapter-card" data-chapter="__all__">
+          <div class="block-head"><b>全部切片（${kb.chapters.reduce((s, c) => s + c.block_count, 0)}）</b></div>
+          <div class="block-snippet">点击浏览全文切片（分页 50/页）</div></div>`;
+      let lastVol = '';
+      for (const c of kb.chapters) {
+        const vol = c.volume_title || '';
+        let volHead = '';
+        if (vol && vol !== lastVol) {
+          volHead = `<div style="margin:10px 0 4px;font-size:11px;color:#7b1fa2;font-weight:600;">📚 ${esc(vol)}</div>`;
+          lastVol = vol;
+        }
+        const sumBits = [];
+        if (c.section_summary_count) sumBits.push('节摘要 ' + c.section_summary_count);
+        if (c.chapter_summary_count) sumBits.push('章摘要 ' + c.chapter_summary_count);
+        html += `${volHead}<div class="chapter-card" data-chapter="${esc(c.chapter_title)}">
+          <div class="block-head"><b>${esc(c.chapter_title || '（无章名）')}</b></div>
+          <div class="block-snippet">切片 ${c.block_count} 个${sumBits.length ? '　·　' + esc(sumBits.join(' · ')) : ''}</div></div>`;
+      }
+      kbMidEl.innerHTML = html;
+      kbMidEl.querySelectorAll('.chapter-card').forEach((el) => {
+        el.addEventListener('click', () => {
+          const ch = el.dataset.chapter;
+          kb.chapter = ch === '__all__' ? null : ch;
+          kb.blocksOffset = 0;
+          renderBlocksToolbar(); loadBlocks();
+        });
+      });
+    }
+
+    // ---- 切片列表 ----
+    function renderBlocksToolbar() {
+      const crumbs = [`<span class="jump-link" data-act="chapters">‹ 章节列表</span>`];
+      crumbs.push(`<span class="jump-link" data-act="doc">${esc(kb.doc.file_name)}</span>`);
+      if (kb.chapter) crumbs.push(' / ' + esc(kb.chapter.slice(0, 40)));
+      kbCrumbEl.innerHTML = crumbs.join('');
+      kbCrumbEl.querySelectorAll('.jump-link').forEach((el) => {
+        el.addEventListener('click', () => el.dataset.act === 'chapters' ? loadChapters() : (kb.chapter = null, kb.blocksOffset = 0, renderBlocksToolbar(), loadBlocks()));
+      });
+      kbToolbarEl.innerHTML = `
+        <button class="toolbar-btn" data-type="">全部类型</button>
+        <button class="toolbar-btn" data-type="text">普通切片</button>
+        <button class="toolbar-btn" data-type="section_summary">仅节摘要</button>
+        <button class="toolbar-btn" data-type="chapter_summary">仅章摘要</button>
+        <input type="text" id="kb-block-q" placeholder="章内 FTS 关键词（BM25，零配额）">
+        <button class="toolbar-btn" id="kb-block-search">搜索</button>`;
+      kbToolbarEl.querySelectorAll('[data-type]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.type === kb.blockType);
+        b.addEventListener('click', () => { kb.blockType = b.dataset.type; kb.blocksOffset = 0; renderBlocksToolbar(); loadBlocks(); });
+      });
+      const doSearch = () => { kb.blocksOffset = 0; loadBlocks(); };
+      $('kb-block-search').addEventListener('click', doSearch);
+      $('kb-block-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+    }
+    async function loadBlocks() {
+      kbMidEl.innerHTML = '<div class="empty-hint">切片加载中...</div>';
+      const q = $('kb-block-q') ? $('kb-block-q').value.trim() : '';
+      const params = new URLSearchParams({ limit: 50, offset: kb.blocksOffset });
+      if (kb.chapter) params.set('chapter', kb.chapter);
+      if (kb.blockType) params.set('type', kb.blockType);
+      if (q) params.set('q', q);
+      try {
+        const data = await kbFetch(`/docs/${kb.doc.document_id}/blocks?${params}`);
+        renderBlocks(data);
+      } catch (e) {
+        kbMidEl.innerHTML = '<div class="err-box">切片加载失败：' + esc(e.message) + '</div>';
+      }
+    }
+    function blockTypeInfo(t) {
+      if (t === 'chapter_summary') return { cls: 'chapter-summary', tagCls: 'chapter', label: '章摘要', cardCls: 'chapter-summary' };
+      if (t === 'section_summary') return { cls: 'summary', tagCls: 'summary', label: '节摘要', cardCls: 'summary' };
+      return { cls: '', tagCls: '', label: '切片', cardCls: '' };
+    }
+    function blockCardHtml(b) {
+      const ti = blockTypeInfo(b.block_type);
+      const loc = [b.volume_title, b.chapter_title, b.section_title, b.subsection_title].filter(Boolean).map((s) => esc(String(s).slice(0, 20))).join(' / ');
+      return `<div class="block-card ${ti.cardCls}" data-block="${esc(b.block_id)}">
+        <div class="block-head">
+          <span class="type-tag ${ti.tagCls}">${ti.label}</span>
+          <span title="卷 / 章 / 节 / 小节">${loc || '（无层级信息）'}</span>
+          ${b.source_anchor_in_md ? '<span class="anchor-tag" title="提取稿锚点">⚓ ' + esc(b.source_anchor_in_md) + '</span>' : ''}
+          <span>${b.char_count} 字</span>
+          <span title="block_id">${shortId(b.block_id)}</span>
+        </div>
+        <div class="block-snippet">${esc(b.snippet)}</div></div>`;
+    }
+    function renderBlocks(data) {
+      kb.blocksTotal = data.total;
+      let html = data.items.map(blockCardHtml).join('');
+      if (!html) html = '<div class="empty-hint">无匹配切片</div>';
+      html += pagerHtml(data.offset, data.limit, data.total, 'kb-block-page');
+      kbMidEl.innerHTML = html;
+      kbMidEl.querySelectorAll('[data-block]').forEach((el) => el.addEventListener('click', () => showBlockDetail(el.dataset.block)));
+      bindPager('kb-block-page', data.offset, data.limit, data.total, (off) => { kb.blocksOffset = off; loadBlocks(); });
+    }
+
+    // ---- 术语表 ----
+    function renderTermsToolbar() {
+      kbCrumbEl.innerHTML = kb.doc ? `<span class="jump-link" data-act="terms-doc">${esc(kb.doc.file_name)}</span>（domain=${esc(kb.doc.domain)})` : '全部 domain';
+      const link = kbCrumbEl.querySelector('[data-act=terms-doc]');
+      if (link) link.addEventListener('click', () => { kb.doc = null; renderDocs(); kb.termsOffset = 0; renderTermsToolbar(); loadTerms(); });
+      kbToolbarEl.innerHTML = `
+        <input type="text" id="kb-term-q" placeholder="术语搜索（canonical / 同义词）">
+        <button class="toolbar-btn" id="kb-term-search">搜索</button>`;
+      if (kb.termQ) $('kb-term-q').value = kb.termQ;
+      const doSearch = () => { kb.termQ = $('kb-term-q').value.trim(); kb.termsOffset = 0; loadTerms(); };
+      $('kb-term-search').addEventListener('click', doSearch);
+      $('kb-term-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+    }
+    async function loadTerms() {
+      kbMidEl.innerHTML = '<div class="empty-hint">术语加载中...</div>';
+      const params = new URLSearchParams({ limit: 100, offset: kb.termsOffset });
+      if (kb.termQ) params.set('q', kb.termQ);
+      if (kb.doc && kb.doc.domain) params.set('domain', kb.doc.domain);
+      try {
+        const data = await kbFetch('/terms?' + params);
+        renderTerms(data);
+      } catch (e) {
+        kbMidEl.innerHTML = '<div class="err-box">术语加载失败：' + esc(e.message) + '</div>';
+      }
+    }
+    function renderTerms(data) {
+      kb.termsTotal = data.total;
+      let html = data.items.map((t) => `
+        <div class="term-card" data-term="${esc(t.term_id)}">
+          <div class="block-head"><b>${esc(t.canonical_term)}</b>
+            <span class="type-tag">${esc(t.domain || '')}</span>
+            <span>出现 ${t.occurrence_count} 次</span>
+            <span title="term_id">${shortId(t.term_id)}</span></div>
+          <div class="term-line">${esc((t.synonyms || []).slice(0, 6).join(' · '))}</div></div>`).join('');
+      if (!html) html = '<div class="empty-hint">无匹配术语</div>';
+      html += pagerHtml(data.offset, data.limit, data.total, 'kb-term-page');
+      kbMidEl.innerHTML = html;
+      kbMidEl.querySelectorAll('[data-term]').forEach((el) => el.addEventListener('click', () => showTermDetail(el.dataset.term)));
+      bindPager('kb-term-page', data.offset, data.limit, data.total, (off) => { kb.termsOffset = off; loadTerms(); });
+    }
+
+    // ---- 检索试跑 ----
+    function renderRetrieveToolbar() {
+      kbCrumbEl.textContent = kb.doc ? `限定 domain=${esc(kb.doc.domain)}（来自所选文档）` : '不限 domain（全库）';
+      kbToolbarEl.innerHTML = `
+        <input type="text" id="kb-retr-q" placeholder="查询词，如：荣格的情结理论">
+        <select id="kb-retr-mode">
+          <option value="fts">FTS 关键词（零配额）</option>
+          <option value="vector">向量语义（耗 Embedding 配额）</option>
+        </select>
+        <select id="kb-retr-k">
+          <option value="5">Top 5</option><option value="10" selected>Top 10</option><option value="20">Top 20</option>
+        </select>
+        <button class="toolbar-btn" id="kb-retr-run">试跑</button>
+        <span class="quota-warn" id="kb-retr-warn"></span>`;
+      $('kb-retr-mode').addEventListener('change', () => {
+        $('kb-retr-warn').textContent = $('kb-retr-mode').value === 'vector' ? '⚠ 每次试跑消耗 Embedding 配额' : '';
+      });
+      $('kb-retr-run').addEventListener('click', runRetrieve);
+      $('kb-retr-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') runRetrieve(); });
+    }
+    async function runRetrieve() {
+      const q = $('kb-retr-q').value.trim();
+      if (!q) { kbMidEl.innerHTML = '<div class="err-box">请输入查询词</div>'; return; }
+      const mode = $('kb-retr-mode').value;
+      const k = $('kb-retr-k').value;
+      kbMidEl.innerHTML = '<div class="empty-hint">检索中...' + (mode === 'vector' ? '（调用 Embedding API）' : '') + '</div>';
+      const params = new URLSearchParams({ q, mode, k });
+      if (kb.doc && kb.doc.domain) params.set('domain', kb.doc.domain);
+      try {
+        const data = await kbFetch('/retrieve?' + params);
+        let html = `<div class="block-head">模式：${mode === 'fts' ? 'FTS BM25' : '向量语义'}　命中 ${data.items.length} 条</div>`;
+        html += data.items.map((it) => `
+          <div class="block-card" data-block="${esc(it.block_id)}">
+            <div class="block-head">
+              <span class="score-badge" title="${esc(it.score_type)}">${it.score}</span>
+              <span>${esc(it.domain || '')}</span>
+              <span>${esc((it.chapter_title || '').slice(0, 30))}</span>
+              <span>${shortId(it.block_id)}</span>
+            </div>
+            <div class="block-snippet">${esc(it.snippet)}</div></div>`).join('');
+        if (!data.items.length) html += '<div class="empty-hint">无命中</div>';
+        kbMidEl.innerHTML = html;
+        kbMidEl.querySelectorAll('[data-block]').forEach((el) => el.addEventListener('click', () => showBlockDetail(el.dataset.block)));
+      } catch (e) {
+        kbMidEl.innerHTML = '<div class="err-box">检索失败：' + esc(e.message) + '</div>';
+      }
+    }
+
+    // ---- 右栏：详情 ----
+    async function showBlockDetail(blockId) {
+      kbDetailEl.innerHTML = '<div class="empty-hint">加载中...</div>';
+      try {
+        const d = await kbFetch('/blocks/' + encodeURIComponent(blockId));
+        const b = d.block;
+        const ti = blockTypeInfo(b.block_type);
+        const typeLabel = b.block_type === 'chapter_summary' ? '章摘要 chapter_summary'
+          : b.block_type === 'section_summary' ? '节摘要 section_summary'
+          : b.block_type === 'image' ? '图片 image' : '普通切片 text';
+        let html = `<div class="detail-meta">
+          block_id: ${esc(b.block_id)}<br>
+          document_id: ${esc(b.document_id)}<br>
+          类型: ${typeLabel}　domain: ${esc(b.domain)}　语言: ${esc(b.language)}<br>
+          卷: ${esc(b.volume_title || '-')}（#${esc(b.volume_index ?? '-')}）<br>
+          章: ${esc(b.chapter_title || '-')}　节: ${esc(b.section_title || '-')}　小节: ${esc(b.subsection_title || '-')}<br>
+          锚点: ${esc(b.source_anchor_in_md || '-')}　字数: ${b.char_count}
+          ${b.extracted_md_path ? '<br>提取稿: ' + esc(b.extracted_md_path) : ''}
+        </div>
+        <div class="detail-body">${esc(b.text)}</div>`;
+        if ((b.block_type === 'section_summary' || b.block_type === 'chapter_summary') && d.children && d.children.length) {
+          const childLabel = b.block_type === 'chapter_summary'
+            ? `覆盖节摘要（${d.children.length}，点击下钻到节摘要与其正文）`
+            : `覆盖段落（${d.children.length}，点击跳转）`;
+          html += `<h4 style="margin:14px 0 6px;font-size:12px;color:#6e6e73;">${childLabel}</h4>`;
+          html += d.children.map((c) => {
+            const cti = blockTypeInfo(c.block_type);
+            const loc = [c.volume_title, c.chapter_title, c.section_title, c.subsection_title].filter(Boolean).map((s) => esc(String(s).slice(0, 24))).join(' / ');
+            return `<div class="child-item" data-block="${esc(c.block_id)}">
+            <div class="block-head"><span class="type-tag ${cti.tagCls}">${cti.label}</span><span>${loc}</span><span>${c.char_count} 字</span><span>${shortId(c.block_id)}</span></div>
+            ${esc(c.snippet)}</div>`;
+          }).join('');
+        }
+        if (b.block_type === 'text' && d.parent_summary) {
+          html += `<h4 style="margin:14px 0 6px;font-size:12px;color:#6e6e73;">所属节摘要（Parent Retrieval）</h4>
+            <div class="child-item" data-block="${esc(d.parent_summary.block_id)}">
+              <div class="block-head"><span class="type-tag summary">节摘要</span><span>${esc(d.parent_summary.section_title || d.parent_summary.chapter_title)}</span><span>${shortId(d.parent_summary.block_id)}</span></div>
+              点击查看摘要全文与其覆盖的全部段落</div>`;
+        }
+        if (b.block_type === 'section_summary' && b.parent_chapter_summary_id) {
+          html += `<h4 style="margin:14px 0 6px;font-size:12px;color:#6e6e73;">所属章摘要（分级链式展开）</h4>
+            <div class="child-item" data-block="${esc(b.parent_chapter_summary_id)}">
+              <div class="block-head"><span class="type-tag chapter">章摘要</span><span>${shortId(b.parent_chapter_summary_id)}</span></div>
+              点击查看章摘要与其覆盖的全部节摘要</div>`;
+        }
+        kbDetailEl.innerHTML = html;
+        kbDetailEl.querySelectorAll('[data-block]').forEach((el) => el.addEventListener('click', () => showBlockDetail(el.dataset.block)));
+      } catch (e) {
+        kbDetailEl.innerHTML = '<div class="err-box">详情加载失败：' + esc(e.message) + '</div>';
+      }
+    }
+    async function showTermDetail(termId) {
+      kbDetailEl.innerHTML = '<div class="empty-hint">加载中...</div>';
+      try {
+        const d = await kbFetch('/terms/' + encodeURIComponent(termId));
+        const t = d.term;
+        let html = `<div class="detail-meta">
+          term_id: ${esc(t.term_id)}　domain: ${esc(t.domain)}<br>
+          canonical_term: ${esc(t.canonical_term)}
+        </div>
+        <div class="detail-body">
+          同义词：${esc((t.synonyms || []).join(' · ') || '（无）')}<br>
+          中英对照：${esc(Object.entries(t.language_pairs || {}).map(([k, v]) => k + '=' + v).join('；') || '（无）')}<br>
+          定义位置：${esc(JSON.stringify(t.definition_location || {}))}<br>
+          相关术语：${esc((t.related_terms || []).join(' · ') || '（无）')}<br>
+          出现段落数：${(t.occurrence_block_ids || []).length}
+        </div>`;
+        if (d.occurrences && d.occurrences.length) {
+          html += `<h4 style="margin:14px 0 6px;font-size:12px;color:#6e6e73;">出现片段（前 ${d.occurrences.length} 条，点击跳转切片）</h4>`;
+          html += d.occurrences.map((o) => `<div class="child-item" data-block="${esc(o.block_id)}">
+            <div class="block-head"><span>${esc((o.chapter_title || '').slice(0, 30))}</span><span>${shortId(o.block_id)}</span></div>
+            ${esc(o.snippet)}</div>`).join('');
+        }
+        kbDetailEl.innerHTML = html;
+        kbDetailEl.querySelectorAll('[data-block]').forEach((el) => el.addEventListener('click', () => showBlockDetail(el.dataset.block)));
+      } catch (e) {
+        kbDetailEl.innerHTML = '<div class="err-box">详情加载失败：' + esc(e.message) + '</div>';
+      }
+    }
+
+    // ---- 分页 ----
+    function pagerHtml(offset, limit, total, cls) {
+      const from = total === 0 ? 0 : offset + 1;
+      const to = Math.min(offset + limit, total);
+      const page = Math.floor(offset / limit) + 1;
+      const pages = Math.max(1, Math.ceil(total / limit));
+      return `<div class="pager ${cls}">
+        <button class="toolbar-btn" data-page="prev" ${offset === 0 ? 'disabled' : ''}>‹ 上一页</button>
+        <span>${from}-${to} / 共 ${total} 条（第 ${page}/${pages} 页）</span>
+        <button class="toolbar-btn" data-page="next" ${to >= total ? 'disabled' : ''}>下一页 ›</button></div>`;
+    }
+    function bindPager(cls, offset, limit, total, cb) {
+      const el = document.querySelector('.' + cls);
+      if (!el) return;
+      el.querySelector('[data-page=prev]').addEventListener('click', () => { if (offset > 0) cb(Math.max(0, offset - limit)); });
+      el.querySelector('[data-page=next]').addEventListener('click', () => { if (offset + limit < total) cb(offset + limit); });
+    }
+
+    // ---- 初始化 ----
+    connectSSE();
+    refreshStatus();
+    textInput.focus();
+  </script>
+</body>
+</html>
